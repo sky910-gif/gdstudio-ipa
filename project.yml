@@ -1,0 +1,49 @@
+name: GDMusic
+options:
+  bundleIdPrefix: xyz.gdstudio
+  deploymentTarget:
+    iOS: "14.0"
+  developmentLanguage: zh-Hans
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    IPHONEOS_DEPLOYMENT_TARGET: "14.0"
+    # 构建未签名 IPA，不做代码签名
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+
+targets:
+  GDMusic:
+    type: application
+    platform: iOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: App
+    # XcodeGen 据此生成真实的 App/Info.plist 并设置 INFOPLIST_FILE
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: GD音乐
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        "UISupportedInterfaceOrientations~ipad":
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # 关键：允许后台播放音频（锁屏不断流、网页不被挂起）
+        UIBackgroundModes:
+          - audio
+        # 允许网页加载 http 音频源（不影响 https）
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UIViewControllerBasedStatusBarAppearance: false
+        UIStatusBarStyle: UIStatusBarStyleLightContent
