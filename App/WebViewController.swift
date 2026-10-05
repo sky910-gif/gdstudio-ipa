@@ -23,9 +23,14 @@ final class WebViewController: UIViewController {
     private var webView: WKWebView!
     private let remoteController = RemoteCommandController()
     private let messageHandler = WeakScriptMessageHandler()
+    private let cacheSchemeHandler = GDCacheSchemeHandler()
 
-    /// 右上角悬浮“切站”按钮
+    /// 右上角悬浮按钮
     private let switchButton = UIButton(type: .system)
+    private let libraryButton = UIButton(type: .system)
+
+    /// 标记是否已因断网自动弹过离线曲库
+    private var didAutoOpenLibrary = false
 
     // MARK: - 生命周期
 
@@ -44,6 +49,9 @@ final class WebViewController: UIViewController {
         messageHandler.delegate = self
         config.userContentController.add(messageHandler, name: "gdBridge")
 
+        // 注册自定义缓存协议（必须在创建 WebView 之前）
+        config.setURLSchemeHandler(cacheSchemeHandler, forURLScheme: "gdcache")
+
         webView = WKWebView(frame: .zero, configuration: config)
         webView.scrollView.bounces = false
         webView.allowsBackForwardNavigationGestures = true
@@ -59,7 +67,7 @@ final class WebViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        setupSwitchButton()
+        setupTopButtons()
         loadSavedSite()
     }
 
@@ -90,20 +98,63 @@ final class WebViewController: UIViewController {
 
     // MARK: - 悬浮切换按钮
 
-    private func setupSwitchButton() {
+    private func stylePill(_ button: UIButton) {
+        button.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
+        button.setTitleColor(.white, for: .normal)
+        button.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        button.layer.cornerRadius = 15
+        button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+    }
+
+    private func setupTopButtons() {
+        // 离线曲库按钮（左上）
+        libraryButton.translatesAutoresizingMaskIntoConstraints = false
+        libraryButton.setTitle("离线曲库", for: .normal)
+        stylePill(libraryButton)
+        libraryButton.addTarget(self, action: #selector(openLibrary), for: .touchUpInside)
+        view.addSubview(libraryButton)
+
+        // 切站按钮（右上）
         switchButton.translatesAutoresizingMaskIntoConstraints = false
-        switchButton.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
-        switchButton.setTitleColor(.white, for: .normal)
-        switchButton.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        switchButton.layer.cornerRadius = 15
-        switchButton.contentEdgeInsets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        stylePill(switchButton)
         switchButton.addTarget(self, action: #selector(showSiteMenu), for: .touchUpInside)
         view.addSubview(switchButton)
 
         NSLayoutConstraint.activate([
+            libraryButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            libraryButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+
             switchButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             switchButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
         ])
+    }
+
+    @objc private func openLibrary() {
+        let vc = CacheLibraryViewController()
+        vc.onPick = { [weak self] entry in
+            self?.playCached(entry)
+        }
+        let nav = UINavigationController(rootViewController: vc)
+        present(nav, animated: true)
+    }
+
+    /// 让 WebView 播放一条已缓存歌曲
+    private func playCached(_ entry: CacheEntry) {
+        let cacheURL = "gdcache://item/\(entry.key)"
+        var artwork = ""
+        if let url = CacheStore.shared.artworkURL(for: entry.key) {
+            artwork = url.absoluteString
+        }
+        let meta: [String: Any] = [
+            "title": entry.title,
+            "artist": entry.artist,
+            "artwork": artwork,
+            "duration": entry.duration,
+        ]
+        let jsonData = try? JSONSerialization.data(withJSONObject: meta)
+        let json = jsonData.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let js = "window.__gd && window.__gd.playCached('\(cacheURL)', \(json))"
+        webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
     @objc private func showSiteMenu() {
@@ -188,6 +239,19 @@ extension WebViewController: WKNavigationDelegate {
             if UIApplication.shared.canOpenURL(url) { UIApplication.shared.open(url) }
             decisionHandler(.cancel)
         }
+    }
+
+    /// 主页面加载失败（通常是断网）且本地有缓存时，自动进入离线曲库
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                 withError error: Error) {
+        guard !didAutoOpenLibrary, !CacheStore.shared.allEntries().isEmpty else { return }
+        didAutoOpenLibrary = true
+        openLibrary()
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // 页面能正常打开，重置断网标记
+        didAutoOpenLibrary = false
     }
 }
 
