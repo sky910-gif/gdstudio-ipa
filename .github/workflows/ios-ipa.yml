@@ -17,23 +17,26 @@ on:
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-15
+    runs-on: macos-14
     timeout-minutes: 40
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install XcodeGen
+      - name: Install pinned XcodeGen (2.38.0)
         run: |
-          which xcodegen || brew install xcodegen
-          xcodegen --version
+          # 2.38.0 生成 Xcode 15 可读取的工程格式（object version 56）
+          brew install xcodegen
+          curl -sSL https://github.com/yonaskolb/XcodeGen/releases/download/2.38.0/xcodegen.zip -o /tmp/xcodegen.zip
+          unzip -o /tmp/xcodegen.zip -d /tmp/xg
+          /tmp/xg/xcodegen --version
 
       - name: Show Xcode version
         run: xcodebuild -version
 
       - name: Generate Xcode project
-        run: xcodegen generate
+        run: /tmp/xg/xcodegen generate
 
       - name: Archive (CODE_SIGNING_ALLOWED=NO)
         run: |
