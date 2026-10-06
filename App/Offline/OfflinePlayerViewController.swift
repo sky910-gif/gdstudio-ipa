@@ -47,6 +47,11 @@ final class OfflinePlayerViewController: UIViewController {
         controller.onChange = { [weak self] in
             self?.refresh()
         }
+        controller.onError = { [weak self] message in
+            let alert = UIAlertController(title: "无法播放", message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "好", style: .default))
+            self?.present(alert, animated: true)
+        }
         controller.start()
         refresh()
     }
