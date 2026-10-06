@@ -2,10 +2,12 @@ import UIKit
 import WebKit
 import MediaPlayer
 
-/// 全屏 WKWebView 播放器外壳，支持在多个音乐站点之间切换并记住选择。
+/// 全屏 WKWebView 播放器外壳（1.2.0 稳定方案）：
+/// 网页负责在线播放，原生做缓存代理；离线曲库为独立界面，
+/// 点开离线歌曲会进入原生音乐播放器。
 final class WebViewController: UIViewController {
 
-    // MARK: - 可切换的站点（如需增减，改这里即可）
+    // MARK: - 可切换的站点
 
     struct Site: Equatable {
         let name: String
@@ -21,15 +23,12 @@ final class WebViewController: UIViewController {
     private static let selectedIndexKey = "selectedSiteIndex"
 
     private var webView: WKWebView!
-    private let remoteController = RemoteCommandController()
+    private let remoteController = RemoteCommandController.shared
     private let messageHandler = WeakScriptMessageHandler()
     private let cacheSchemeHandler = GDCacheSchemeHandler()
 
-    /// 右上角悬浮按钮
     private let switchButton = UIButton(type: .system)
     private let libraryButton = UIButton(type: .system)
-
-    /// 标记是否已因断网自动弹过离线曲库
     private var didAutoOpenLibrary = false
 
     // MARK: - 生命周期
@@ -48,8 +47,6 @@ final class WebViewController: UIViewController {
 
         messageHandler.delegate = self
         config.userContentController.add(messageHandler, name: "gdBridge")
-
-        // 注册自定义缓存协议（必须在创建 WebView 之前）
         config.setURLSchemeHandler(cacheSchemeHandler, forURLScheme: "gdcache")
 
         webView = WKWebView(frame: .zero, configuration: config)
@@ -68,23 +65,10 @@ final class WebViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupTopButtons()
-        wireNativePlayer()
         loadSavedSite()
     }
 
-    /// 把原生播放内核的事件序列化后投递回注入脚本
-    private func wireNativePlayer() {
-        NativePlayer.shared.onEvent = { [weak self] dict in
-            guard
-                let data = try? JSONSerialization.data(withJSONObject: dict),
-                let json = String(data: data, encoding: .utf8)
-            else { return }
-            let js = "window.__gdNativeEvent && window.__gdNativeEvent(\(json))"
-            self?.webView.evaluateJavaScript(js, completionHandler: nil)
-        }
-    }
-
-    // MARK: - 站点加载
+    // MARK: - 站点
 
     private var allSites: [Site] {
         var list = Self.sites
@@ -103,13 +87,12 @@ final class WebViewController: UIViewController {
 
     private func load(site: Site) {
         guard let url = URL(string: site.urlString) else { return }
-        // 切站时清理锁屏信息，避免显示上一个站的曲目
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
         switchButton.setTitle(site.name, for: .normal)
     }
 
-    // MARK: - 悬浮切换按钮
+    // MARK: - 顶部按钮
 
     private func stylePill(_ button: UIButton) {
         button.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
@@ -120,14 +103,12 @@ final class WebViewController: UIViewController {
     }
 
     private func setupTopButtons() {
-        // 离线曲库按钮（左上）
         libraryButton.translatesAutoresizingMaskIntoConstraints = false
         libraryButton.setTitle("离线曲库", for: .normal)
         stylePill(libraryButton)
         libraryButton.addTarget(self, action: #selector(openLibrary), for: .touchUpInside)
         view.addSubview(libraryButton)
 
-        // 切站按钮（右上）
         switchButton.translatesAutoresizingMaskIntoConstraints = false
         stylePill(switchButton)
         switchButton.addTarget(self, action: #selector(showSiteMenu), for: .touchUpInside)
@@ -136,7 +117,6 @@ final class WebViewController: UIViewController {
         NSLayoutConstraint.activate([
             libraryButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             libraryButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-
             switchButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             switchButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
         ])
@@ -144,36 +124,25 @@ final class WebViewController: UIViewController {
 
     @objc private func openLibrary() {
         let vc = CacheLibraryViewController()
-        vc.onPick = { [weak self] entry in
-            self?.playCached(entry)
+        // 点歌：先关闭曲库，完成后再全屏弹出原生播放器
+        vc.onPick = { [weak self] entries, index in
+            self?.dismiss(animated: true) {
+                self?.presentOfflinePlayer(entries: entries, index: index)
+            }
         }
         let nav = UINavigationController(rootViewController: vc)
         present(nav, animated: true)
     }
 
-    /// 让 WebView 播放一条已缓存歌曲
-    private func playCached(_ entry: CacheEntry) {
-        let cacheURL = "gdcache://item/\(entry.key)"
-        var artwork = ""
-        if let url = CacheStore.shared.artworkURL(for: entry.key) {
-            artwork = url.absoluteString
-        }
-        let meta: [String: Any] = [
-            "title": entry.title,
-            "artist": entry.artist,
-            "artwork": artwork,
-            "duration": entry.duration,
-        ]
-        let jsonData = try? JSONSerialization.data(withJSONObject: meta)
-        let json = jsonData.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        let js = "window.__gd && window.__gd.playCached('\(cacheURL)', \(json))"
-        webView.evaluateJavaScript(js, completionHandler: nil)
+    private func presentOfflinePlayer(entries: [CacheEntry], index: Int) {
+        let player = OfflinePlayerViewController(entries: entries, startIndex: index)
+        player.modalPresentationStyle = .fullScreen
+        present(player, animated: true)
     }
 
     @objc private func showSiteMenu() {
         let list = allSites
         let alert = UIAlertController(title: "切换站点", message: nil, preferredStyle: .actionSheet)
-
         let currentHost = webView.url?.host
         for (idx, site) in list.enumerated() {
             let active = currentHost == URL(string: site.urlString)?.host
@@ -183,12 +152,10 @@ final class WebViewController: UIViewController {
                 self?.load(site: site)
             })
         }
-
         alert.addAction(UIAlertAction(title: "自定义网址…", style: .default) { [weak self] _ in
             self?.askCustomURL()
         })
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-
         if let pop = alert.popoverPresentationController {
             pop.sourceView = switchButton
             pop.sourceRect = switchButton.bounds
@@ -215,10 +182,9 @@ final class WebViewController: UIViewController {
             }
             guard URL(string: text) != nil else { return }
             UserDefaults.standard.set(text, forKey: Self.customSiteKey)
-            // 自定义项位于 allSites 末尾
             UserDefaults.standard.set(self.allSites.count - 1, forKey: Self.selectedIndexKey)
             self.load(site: Site(name: "自定义", urlString: text))
-        })
+        }
         present(input, animated: true)
     }
 }
@@ -231,23 +197,6 @@ extension WebViewController: WKScriptMessageHandler {
         didReceive message: WKScriptMessage
     ) {
         guard message.name == "gdBridge", let dict = message.body as? [String: Any] else { return }
-
-        // 播放控制类消息：交给原生内核
-        switch dict["kind"] as? String {
-        case "play_request":
-            if let src = dict["src"] as? String, let id = dict["id"] as? String {
-                NativePlayer.shared.open(urlString: src, elementId: id)
-            }
-        case "pause_request":
-            NativePlayer.shared.pause()
-        case "seek_request":
-            if let t = dict["time"] as? Double {
-                NativePlayer.shared.seek(to: t)
-            }
-        default:
-            break
-        }
-
         remoteController.handle(message: dict)
     }
 }
@@ -271,7 +220,6 @@ extension WebViewController: WKNavigationDelegate {
         }
     }
 
-    /// 主页面加载失败（通常是断网）且本地有缓存时，自动进入离线曲库
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
         guard !didAutoOpenLibrary, !CacheStore.shared.allEntries().isEmpty else { return }
@@ -280,7 +228,6 @@ extension WebViewController: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // 页面能正常打开，重置断网标记
         didAutoOpenLibrary = false
     }
 }
