@@ -68,7 +68,20 @@ final class WebViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupTopButtons()
+        wireNativePlayer()
         loadSavedSite()
+    }
+
+    /// 把原生播放内核的事件序列化后投递回注入脚本
+    private func wireNativePlayer() {
+        NativePlayer.shared.onEvent = { [weak self] dict in
+            guard
+                let data = try? JSONSerialization.data(withJSONObject: dict),
+                let json = String(data: data, encoding: .utf8)
+            else { return }
+            let js = "window.__gdNativeEvent && window.__gdNativeEvent(\(json))"
+            self?.webView.evaluateJavaScript(js, completionHandler: nil)
+        }
     }
 
     // MARK: - 站点加载
@@ -218,6 +231,23 @@ extension WebViewController: WKScriptMessageHandler {
         didReceive message: WKScriptMessage
     ) {
         guard message.name == "gdBridge", let dict = message.body as? [String: Any] else { return }
+
+        // 播放控制类消息：交给原生内核
+        switch dict["kind"] as? String {
+        case "play_request":
+            if let src = dict["src"] as? String, let id = dict["id"] as? String {
+                NativePlayer.shared.open(urlString: src, elementId: id)
+            }
+        case "pause_request":
+            NativePlayer.shared.pause()
+        case "seek_request":
+            if let t = dict["time"] as? Double {
+                NativePlayer.shared.seek(to: t)
+            }
+        default:
+            break
+        }
+
         remoteController.handle(message: dict)
     }
 }
