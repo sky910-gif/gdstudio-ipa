@@ -38,7 +38,7 @@ final class NativePlayer: NSObject {
             [weak self] time in
             guard let self = self else { return }
             let sec = CMTimeGetSeconds(time)
-            guard isFinite(sec) else { return }
+            guard sec.isFinite else { return }
             self.emit([
                 "kind": "native_time",
                 "id": self.currentElementId ?? "",
@@ -128,7 +128,7 @@ final class NativePlayer: NSObject {
                     "kind": "native_ready",
                     "id": self.currentElementId ?? "",
                 ]
-                if isFinite(dur) { dict["duration"] = dur }
+                if dur.isFinite { dict["duration"] = dur }
                 self.emit(dict)
             case .failed:
                 self.failCurrent(reason: item.error?.localizedDescription ?? "item failed")
