@@ -113,10 +113,74 @@ final class CacheStore {
         try? data.write(to: indexFile(), options: .atomic)
     }
 
+    // MARK: - 文件扩展名（AVPlayer 本地播放依赖扩展名识别格式）
+
+    /// MIME 类型 -> 文件扩展名
+    private static func fileExtension(forMime mime: String, fallbackURL urlString: String = "") -> String {
+        let m = mime.lowercased().trimmingCharacters(in: .whitespaces)
+        switch m {
+        case "audio/mpeg", "audio/mp3": return ".mp3"
+        case "audio/mp4", "audio/m4a", "audio/x-m4a": return ".m4a"
+        case "audio/aac": return ".aac"
+        case "audio/ogg", "application/ogg": return ".ogg"
+        case "audio/flac", "audio/x-flac": return ".flac"
+        case "audio/wav", "audio/x-wav", "audio/wave": return ".wav"
+        case "audio/webm": return ".weba"
+        case "audio/aiff", "audio/x-aiff": return ".aiff"
+        case "audio/amr": return ".amr"
+        default: break
+        }
+        // 从原始 URL 的路径后缀推断
+        if let url = URL(string: urlString), !url.pathExtension.isEmpty {
+            return "." + url.pathExtension.lowercased()
+        }
+        return ".mp3"   // 兜底
+    }
+
+    /// 某条缓存音频应使用的完整文件名（含扩展名）
+    private func audioFileName(for entry: CacheEntry) -> String {
+        return entry.key + Self.fileExtension(forMime: entry.mime, fallbackURL: entry.url)
+    }
+
     // MARK: - 查询
 
-    func audioFile(for key: String) -> URL { audioDir.appendingPathComponent(key) }
+    /// 队列外使用：通过 entry 的 MIME 决定扩展名
+    func audioFile(for key: String) -> URL {
+        if let entry = entry(for: key) {
+            return audioDir.appendingPathComponent(audioFileName(for: entry))
+        }
+        return audioDir.appendingPathComponent(key + ".mp3")
+    }
+
+    /// 队列内使用：直接用 index，避免再次 queue.sync 导致死锁
+    private func audioFileInQueue(for key: String) -> URL {
+        if let entry = index[key] {
+            return audioDir.appendingPathComponent(audioFileName(for: entry))
+        }
+        return audioDir.appendingPathComponent(key + ".mp3")
+    }
     func artworkFile(for key: String) -> URL { artworkDir.appendingPathComponent(key + ".jpg") }
+
+    /// 旧版本音频文件没有扩展名，启动时统一改名迁移
+    func migrateLegacyAudioFiles() {
+        queue.async {
+            let fm = FileManager.default
+            guard let files = try? fm.contentsOfDirectory(at: self.audioDir,
+                                                         includingPropertiesForKeys: nil)
+            else { return }
+
+            for file in files {
+                let name = file.lastPathComponent
+                // 已经有扩展名（名字里含 "."）的跳过
+                if name.contains(".") { continue }
+                guard let entry = self.index[name] else { continue }
+                let newName = self.audioFileName(for: entry)
+                let dest = self.audioDir.appendingPathComponent(newName)
+                try? fm.removeItem(at: dest)
+                try? fm.moveItem(at: file, to: dest)
+            }
+        }
+    }
 
     func entry(for key: String) -> CacheEntry? {
         var result: CacheEntry?
@@ -151,13 +215,26 @@ final class CacheStore {
                 title: String, artist: String, duration: Double) -> Bool {
         var ok = false
         queue.sync {
-            // 已有同名则先删旧
-            let dest = audioFile(for: key)
+            // 先确定目标文件名（按本次 MIME / 原始 URL 决定扩展名）
+            let ext = Self.fileExtension(forMime: mime, fallbackURL: originalURL)
+            let dest = audioDir.appendingPathComponent(key + ext)
+
+            // 清掉该 key 的其它旧文件名（含无扩展名的历史文件）
+            let siblingName = key + ext
+            if let files = try? FileManager.default.contentsOfDirectory(at: audioDir,
+                                                                        includingPropertiesForKeys: nil) {
+                for f in files {
+                    let n = f.lastPathComponent
+                    if n.hasPrefix(key) && n != siblingName {
+                        try? FileManager.default.removeItem(at: f)
+                    }
+                }
+            }
             try? FileManager.default.removeItem(at: dest)
+
             do {
                 try FileManager.default.moveItem(at: tempFile, to: dest)
             } catch {
-                // 跨卷移动失败时尝试拷贝
                 do { try FileManager.default.copyItem(at: tempFile, to: dest) }
                 catch { ok = false; return }
             }
@@ -276,7 +353,7 @@ final class CacheStore {
             }
 
             // 删除重复音频与封面文件
-            try? FileManager.default.removeItem(at: audioFile(for: dk))
+            try? FileManager.default.removeItem(at: audioFileInQueue(for: dk))
             if let art = dup.artworkFile {
                 try? FileManager.default.removeItem(at: artworkDir.appendingPathComponent(art))
             }
@@ -284,7 +361,7 @@ final class CacheStore {
         }
 
         // 更新大小
-        let keepFile = audioFile(for: keepKey)
+        let keepFile = audioFileInQueue(for: keepKey)
         let size = (try? keepFile.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         merged.size = Int64(size)
         index[keepKey] = merged
@@ -311,7 +388,7 @@ final class CacheStore {
     func delete(key: String) {
         queue.sync {
             let e = index.removeValue(forKey: key)
-            try? FileManager.default.removeItem(at: audioFile(for: key))
+            try? FileManager.default.removeItem(at: audioFileInQueue(for: key))
             if let art = e?.artworkFile {
                 try? FileManager.default.removeItem(at: artworkDir.appendingPathComponent(art))
             }
