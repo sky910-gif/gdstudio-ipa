@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import WebKit
 import UniformTypeIdentifiers
 
 /// 接管 gdcache:// 自定义协议：
