@@ -95,8 +95,9 @@ final class AudioSessionController: NSObject {
 
         switch type {
         case .ended:
-            // 中断结束，重新激活会话（网页的音频会自行恢复或继续下一首）
+            // 中断结束，重新激活会话并恢复原生内核
             try? AVAudioSession.sharedInstance().setActive(true)
+            NativePlayer.shared.resumeAfterInterruption()
         default:
             break
         }
