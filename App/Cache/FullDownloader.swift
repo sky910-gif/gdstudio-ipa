@@ -15,6 +15,8 @@ final class FullDownloader: NSObject {
         let exists = sessions[key] != nil
         lock.unlock()
         guard !exists else { return }
+        // 已缓存（含归一化后等价的 URL）就不再重复下载
+        guard !CacheStore.shared.has(key: key) else { return }
         guard CacheStore.shared.canCache(size: 1) else { return }
         guard let url = URL(string: urlString) else { return }
 
