@@ -97,16 +97,41 @@ final class OfflinePlayerController: NSObject {
 
     // MARK: - 播放当前项
 
+    /// 播放出错时通知界面（展示提示）
+    var onError: ((String) -> Void)?
+
     private func playCurrent(resetPosition: Bool) {
         guard let entry = currentEntry else { stop(); return }
 
         let fileURL = CacheStore.shared.audioFile(for: entry.key)
-        let item = AVPlayerItem(url: fileURL)
 
+        // 文件存在性检查
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            reportError("缓存文件不存在，可能已被清理")
+            return
+        }
+
+        // 显式声明内容类型，避免扩展名不识别
+        let asset: AVURLAsset
+        if #available(iOS 16.0, *) {
+            asset = AVURLAsset(url: fileURL, options: [
+                AVURLAssetOverrideMIMETypeKey: entry.mime.isEmpty ? "audio/mpeg" : entry.mime,
+            ])
+        } else {
+            asset = AVURLAsset(url: fileURL)
+        }
+        let item = AVPlayerItem(asset: asset)
+
+        statusObservation?.invalidate()
         statusObservation = item.observe(\.status) { [weak self] item, _ in
             guard let self = self else { return }
-            if item.status == .readyToPlay {
+            switch item.status {
+            case .readyToPlay:
                 self.pushNowPlaying()
+            case .failed:
+                self.reportError(item.error?.localizedDescription ?? "无法播放该歌曲")
+            default:
+                break
             }
         }
 
@@ -114,6 +139,13 @@ final class OfflinePlayerController: NSObject {
         player.play()
         pushNowPlaying()
         onChange?()
+    }
+
+    private func reportError(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.onError?(message)
+            self?.onChange?()
+        }
     }
 
     // MARK: - 控制
