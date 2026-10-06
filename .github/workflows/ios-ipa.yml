@@ -27,16 +27,16 @@ jobs:
       - name: Install pinned XcodeGen (2.38.0)
         run: |
           # 2.38.0 生成 Xcode 15 可读取的工程格式（object version 56）
-          brew install xcodegen
           curl -sSL https://github.com/yonaskolb/XcodeGen/releases/download/2.38.0/xcodegen.zip -o /tmp/xcodegen.zip
           unzip -o /tmp/xcodegen.zip -d /tmp/xg
-          /tmp/xg/xcodegen --version
+          chmod +x /tmp/xg/xcodegen/bin/xcodegen
+          /tmp/xg/xcodegen/bin/xcodegen --version
 
       - name: Show Xcode version
         run: xcodebuild -version
 
       - name: Generate Xcode project
-        run: /tmp/xg/xcodegen generate
+        run: /tmp/xg/xcodegen/bin/xcodegen generate
 
       - name: Archive (CODE_SIGNING_ALLOWED=NO)
         run: |
