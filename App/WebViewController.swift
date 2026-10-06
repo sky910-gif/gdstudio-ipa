@@ -171,7 +171,7 @@ final class WebViewController: UIViewController {
             tf.text = UserDefaults.standard.string(forKey: Self.customSiteKey) ?? "https://"
         }
         input.addAction(UIAlertAction(title: "取消", style: .cancel))
-        input.addAction(UIAlertAction(title: "打开", style: .default) { [weak self] _ in
+        input.addAction(UIAlertAction(title: "打开", style: .default, handler: { [weak self] _ in
             guard
                 let self = self,
                 var text = input.textFields?.first?.text?.trimmingCharacters(in: .whitespaces),
@@ -184,8 +184,8 @@ final class WebViewController: UIViewController {
             UserDefaults.standard.set(text, forKey: Self.customSiteKey)
             UserDefaults.standard.set(self.allSites.count - 1, forKey: Self.selectedIndexKey)
             self.load(site: Site(name: "自定义", urlString: text))
-        }
-        present(input, animated: true)
+        }))
+        self.present(input, animated: true)
     }
 }
 
