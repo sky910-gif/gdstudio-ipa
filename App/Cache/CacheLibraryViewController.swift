@@ -3,8 +3,8 @@ import UIKit
 /// 离线曲库：展示已缓存歌曲，点击播放，滑动删除，可清空缓存。
 final class CacheLibraryViewController: UIViewController {
 
-    /// 点击某首歌时回调（由外部控制 WebView 播放）
-    var onPick: ((CacheEntry) -> Void)?
+    /// 点击某首歌时回调：给出当前完整列表与点击位置（供原生播放器建立队列）
+    var onPick: (([CacheEntry], Int) -> Void)?
 
     private var entries: [CacheEntry] = []
     private let tableView = UITableView(frame: .zero, style: .insetGrouped)
@@ -100,9 +100,8 @@ extension CacheLibraryViewController: UITableViewDataSource, UITableViewDelegate
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        let entry = entries[indexPath.row]
-        onPick?(entry)
-        navigationController?.dismiss(animated: true)
+        // 具体关闭/弹出由外部处理，避免两个界面同时转场冲突
+        onPick?(entries, indexPath.row)
     }
 
     func tableView(_ tableView: UITableView,
