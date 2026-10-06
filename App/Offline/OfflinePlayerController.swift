@@ -111,9 +111,9 @@ final class OfflinePlayerController: NSObject {
             return
         }
 
-        // 显式声明内容类型，避免扩展名不识别
+        // 显式声明内容类型（iOS 17+），作为扩展名之外的附加保险
         let asset: AVURLAsset
-        if #available(iOS 16.0, *) {
+        if #available(iOS 17.0, *) {
             asset = AVURLAsset(url: fileURL, options: [
                 AVURLAssetOverrideMIMETypeKey: entry.mime.isEmpty ? "audio/mpeg" : entry.mime,
             ])
