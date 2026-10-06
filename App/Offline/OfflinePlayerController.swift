@@ -53,7 +53,7 @@ final class OfflinePlayerController: NSObject {
             self?.updateNowPlayingElapsed()
         }
 
-        rateObservation = player.observe(\.rate, options: [.new]) { [weak self] _ in
+        rateObservation = player.observe(\.rate, options: [.new]) { [weak self] _, _ in
             DispatchQueue.main.async { self?.onChange?() }
         }
 
