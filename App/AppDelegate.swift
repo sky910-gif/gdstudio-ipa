@@ -15,8 +15,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // 尽早激活“播放类”音频会话，是后台/锁屏能持续出声的前提
         audioSession.activate()
 
-        // 后台整理历史重复缓存（不阻塞启动）
+        // 后台整理历史重复缓存、迁移旧的无扩展名音频文件（不阻塞启动）
         DispatchQueue.global(qos: .utility).async {
+            CacheStore.shared.migrateLegacyAudioFiles()
             CacheStore.shared.removeAllDuplicates()
         }
 
