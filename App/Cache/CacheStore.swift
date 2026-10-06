@@ -240,7 +240,7 @@ final class CacheStore {
         }
 
         // 占位条目：比较归一化 URL
-        return stableURL(from: a.url) == stableURL(from: b.url)
+        return Self.stableURL(from: a.url) == Self.stableURL(from: b.url)
     }
 
     /// 把与 keepKey 身份相同的其它条目合并掉：保留 keepKey，删除重复的音频/封面，
